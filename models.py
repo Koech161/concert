@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, Table, Date
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, Table, Date, func, desc
 from sqlalchemy.orm import relationship, sessionmaker, declarative_base
 from datetime import datetime
 
@@ -11,7 +11,6 @@ concerts_association = Table('concerts_association', Base.metadata,
 )
 Base.metadata.create_all(engine)    
 Session = sessionmaker(bind=engine)
-session = Session()
 
 class Band(Base):
     __tablename__ = 'bands'
@@ -29,10 +28,9 @@ class Band(Base):
     def get_venues(self):
         return {concert.venue for concert in self.concerts}
 
-    def play_in_venue(self,session, venue, date_str):
-        date =datetime.strptime(date_str,"%Y-%m-%d").date()
+    def play_in_venue(self, venue, date_str, session):
+        date = datetime.strptime(date_str, "%Y-%m-%d").date()
         concert = Concert(date=date, band=self, venue=venue)
-        # Use the session bound to the current context
         session.add(concert)
         session.commit()
 
@@ -40,15 +38,15 @@ class Band(Base):
         return [concert.introduction() for concert in self.concerts]
 
     @classmethod
-    def most_performances(cls):
-        band_counts = {}
-        for band in session.query(cls).all():
-            band_counts[band] = len(band.concerts)
-        return max(band_counts, key=band_counts.get, default=None)
-    
+    def most_performances(cls, session):
+        band_counts = session.query(
+            cls,
+            func.count(Concert.id).label('concert_count')
+        ).join(Concert).group_by(cls.id).order_by(desc('concert_count')).first()
+        return band_counts[0] if band_counts else None
 
 class Venue(Base):
-    __tablename__ = 'venues'    
+    __tablename__ = 'venues'
 
     id = Column(Integer, primary_key=True)
     title = Column(String, nullable=False)
@@ -69,22 +67,19 @@ class Venue(Base):
     def most_frequent_band(self):
         band_counts = {}
         for concert in self.concerts:
-           band_counts[concert.band] = band_counts.get(concert.band, 0) + 1
-        return max(band_counts, key=band_counts.get)
-        
-
-
+            band_counts[concert.band] = band_counts.get(concert.band, 0) + 1
+        return max(band_counts, key=band_counts.get, default=None)
 
 class Concert(Base):
-    __tablename__ = 'concerts'  
+    __tablename__ = 'concerts'
 
-    id = Column(Integer, primary_key = True)
-    date  = Column(Date, nullable = False)
-    band_id = Column(Integer, ForeignKey('bands.id'), nullable= False)
-    venue_id = Column(Integer, ForeignKey('venues.id'), nullable = False)
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False)
+    band_id = Column(Integer, ForeignKey('bands.id'), nullable=False)
+    venue_id = Column(Integer, ForeignKey('venues.id'), nullable=False)
 
-    band = relationship('Band', back_populates = 'concerts')
-    venue = relationship('Venue', back_populates = 'concerts')
+    band = relationship('Band', back_populates='concerts')
+    venue = relationship('Venue', back_populates='concerts')
 
     def get_band(self):
         return self.band
@@ -97,5 +92,4 @@ class Concert(Base):
     
     def introduction(self):
         return f'Hello {self.venue.city}!!!! We are {self.band.name} and we are from {self.band.hometown}'
-    
 
